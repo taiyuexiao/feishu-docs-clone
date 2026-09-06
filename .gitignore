@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Logs & misc
+*.log
+.DS_Store
+
+# Local tooling / session data
+.workbuddy/
+.zcode/
+
+# Editor
+.vscode/
+.idea/
