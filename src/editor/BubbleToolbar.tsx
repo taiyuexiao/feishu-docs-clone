@@ -1,4 +1,4 @@
-import { useEffect, useReducer } from 'react'
+import { useEffect, useReducer, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/core'
 import { Dropdown } from './Dropdown'
 import { ToolbarBtn, ColorPanel } from './ToolbarBtns'
@@ -6,6 +6,7 @@ import { LinkEditor } from './LinkEditor'
 import { TextStyleMenu } from './TextStyleMenu'
 import { keyHint } from './shortcuts'
 import { slashHelpers } from './slashHelpers'
+import { addComment } from '../data/store'
 import * as I from '../components/icons'
 
 /**
@@ -15,6 +16,10 @@ import * as I from '../components/icons'
  */
 export function BubbleToolbar({ editor }: { editor: Editor }) {
   const [, force] = useReducer((x: number) => x + 1, 0)
+  const [commentOpen, setCommentOpen] = useState(false)
+  const [commentText, setCommentText] = useState('')
+  const commentRef = useRef<HTMLDivElement>(null)
+  const savedRange = useRef<{ from: number; to: number } | null>(null)
 
   useEffect(() => {
     const update = () => {
@@ -60,6 +65,31 @@ export function BubbleToolbar({ editor }: { editor: Editor }) {
 
   const c = () => editor.chain().focus()
 
+  /** 提交评论：给选区加高亮标记并保存到当前文档 */
+  const submitComment = () => {
+    const text = commentText.trim()
+    const range = savedRange.current
+    if (!text || !range) return
+    const quote = editor.state.doc.textBetween(range.from, range.to, '\n')
+    const item = addComment(slashHelpers.docId(), text, quote)
+    // 先恢复选区再加标记（评论输入框聚焦会令编辑器选区坍缩）
+    editor.chain().focus().setTextSelection(range).setCommentMark(item.id).run()
+    setCommentOpen(false)
+    setCommentText('')
+    slashHelpers.toast('评论已添加，可在右上角评论面板查看')
+  }
+
+  // 评论输入浮层的定位跟随浮条
+  useEffect(() => {
+    if (!commentOpen) return
+    const dom = document.querySelector<HTMLElement>('.fe-bubble')
+    const pop = commentRef.current
+    if (dom && pop) {
+      pop.style.left = dom.style.left
+      pop.style.top = `${parseFloat(dom.style.top || '0') + dom.offsetHeight + 6}px`
+    }
+  }, [commentOpen])
+
   return (
     <div className="fe-bubble" onMouseDown={(e) => e.preventDefault()}>
       {/* AI 入口（对齐飞书浮条最左侧「问问豆包/解释」，此处为问问AI） */}
@@ -104,7 +134,7 @@ export function BubbleToolbar({ editor }: { editor: Editor }) {
       <Dropdown button={({ open }) => (
         <ToolbarBtn icon={<I.IconFontColor size={15} />} tip={`颜色 ${keyHint('⌘⌥H', 'Ctrl+Alt+H')}`} on={open} />
       )}>
-        {(close) => <ColorPanel editor={editor} onChange={force} />}
+        {(_close) => <ColorPanel editor={editor} onChange={force} />}
       </Dropdown>
 
       <Dropdown width={264} button={({ open }) => (
@@ -119,11 +149,38 @@ export function BubbleToolbar({ editor }: { editor: Editor }) {
 
       <span className="fe-tool-sep" />
 
+      {/* 评论：输入浮层 → 选区加标记 */}
       <ToolbarBtn
         icon={<I.IconComment size={15} />}
         tip={`评论 ${keyHint('⌘⌥M', 'Ctrl+Alt+M')}`}
-        onClick={() => window.dispatchEvent(new CustomEvent('fe-toast', { detail: '评论功能即将上线，二期接入' }))}
+        on={commentOpen}
+        onClick={() => {
+          const { from, to, empty } = editor.state.selection
+          if (!empty) savedRange.current = { from, to }
+          setCommentOpen((v) => !v)
+        }}
       />
+
+      {commentOpen && (
+        <div className="fe-comment-input" ref={commentRef} onMouseDown={(e) => e.stopPropagation()}>
+          <div className="q">评论「{editor.state.doc.textBetween(editor.state.selection.from, editor.state.selection.to, '\n').slice(0, 24)}…」</div>
+          <textarea
+            autoFocus
+            placeholder="输入评论，Enter 提交"
+            value={commentText}
+            onChange={(e) => setCommentText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitComment() }
+              if (e.key === 'Escape') setCommentOpen(false)
+              e.stopPropagation()
+            }}
+          />
+          <div className="ops">
+            <button className="fe-ai-btn ghost" onClick={() => setCommentOpen(false)}>取消</button>
+            <button className="fe-ai-btn primary" onClick={submitComment}>提交</button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

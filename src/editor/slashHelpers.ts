@@ -19,10 +19,16 @@ export interface SlashHelpers {
   toast: (msg: string) => void
   /** 创建当前文档副本并打开（斜杠菜单「创建副本」） */
   duplicateDoc: () => void
+  /** 打开模版选择面板 */
+  openTemplates: (editor: Editor) => void
+  /** 当前文档 id（评论等功能需要） */
+  docId: () => string
 }
 
 export const slashHelpers: SlashHelpers = {
   openAI: () => {},
   toast: () => {},
   duplicateDoc: () => {},
+  openTemplates: () => {},
+  docId: () => '',
 }

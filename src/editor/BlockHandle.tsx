@@ -45,6 +45,7 @@ export function BlockHandle({ editor, editable }: { editor: Editor; editable: bo
 
   /* ---------- 悬停跟踪：定位顶层块 ---------- */
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- editable 关闭时清把手，属合法的状态重置
     if (!editable) { setHover(null); return }
     const editorDom = editor.view.dom as HTMLElement
     let raf = 0

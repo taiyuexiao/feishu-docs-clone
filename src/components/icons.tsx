@@ -477,6 +477,38 @@ export const IconCollapseLeft = (p: P) => (
   </S>
 )
 
+/** 自动换行 */
+export const IconWrap = (p: P) => (
+  <S {...p}>
+    <path d="M4 6h16M4 12h12a3.5 3.5 0 010 7h-3" />
+    <path d="M15.5 16.5L13 19l2.5 2.5" />
+    <path d="M4 18h4" />
+  </S>
+)
+
+/** 图片放大预览：缩放 */
+export const IconZoomIn = (p: P) => (
+  <S {...p}>
+    <circle cx="11" cy="11" r="6.5" />
+    <path d="M20.5 20.5L16 16M11 8.5v5M8.5 11h5" />
+  </S>
+)
+
+export const IconZoomOut = (p: P) => (
+  <S {...p}>
+    <circle cx="11" cy="11" r="6.5" />
+    <path d="M20.5 20.5L16 16M8.5 11h5" />
+  </S>
+)
+
+/** 下载 */
+export const IconDownload = (p: P) => (
+  <S {...p}>
+    <path d="M12 4v10M8 10.5l4 4 4-4" />
+    <path d="M5 19h14" />
+  </S>
+)
+
 export const IconLogo = ({ size = 24, ...p }: P) => (
   <svg width={size} height={size} viewBox="0 0 24 24" {...p}>
     <rect x="1" y="1" width="22" height="22" rx="6" fill="#3370FF" />

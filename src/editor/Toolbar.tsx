@@ -1,17 +1,17 @@
-import { useEffect, useReducer, useState } from 'react'
+import { useEffect, useReducer } from 'react'
 import type { Editor } from '@tiptap/core'
 import { Dropdown } from './Dropdown'
 import { ToolbarBtn, ColorPanel } from './ToolbarBtns'
-import { LinkEditor } from './LinkEditor'
 import { getVisibleHeadingLevels } from './headingLevels'
 import { keyHint } from './shortcuts'
 import { pickAndInsertImage } from './slashItems'
-import { AutoFormatDialog } from './ai/AutoFormat'
 import { loadAIConfig, hasAIConfig } from './ai/config'
 import { slashHelpers } from './slashHelpers'
 import * as I from '../components/icons'
 
 const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九']
+
+const CELL_BG = ['transparent', '#FFF1B8', '#D3F261', '#D6E4FF', '#EADCFF', '#FFD6E7', '#FFE7BA', '#F0F1F2']
 
 /** 当前块类型标签（样式下拉按钮显示当前样式名） */
 export function currentBlockLabel(editor: Editor): string {
@@ -23,10 +23,9 @@ export function currentBlockLabel(editor: Editor): string {
   return '正文'
 }
 
-/** 顶部工具栏（对齐飞书：无字号概念；样式下拉渐进；评论入口；合并颜色面板） */
-export function Toolbar({ editor }: { editor: Editor }) {
+/** 顶部工具栏（对齐飞书：无字号概念；样式下拉渐进；评论位；合并颜色面板；表格单元格增强） */
+export function Toolbar({ editor, onAutoFormat }: { editor: Editor; onAutoFormat?: () => void }) {
   const [, force] = useReducer((x: number) => x + 1, 0)
-  const [fmtOpen, setFmtOpen] = useState(false)
   useEffect(() => {
     editor.on('transaction', force)
     return () => { editor.off('transaction', force) }
@@ -34,6 +33,7 @@ export function Toolbar({ editor }: { editor: Editor }) {
 
   const c = () => editor.chain().focus()
   const levels = getVisibleHeadingLevels(editor.state.doc)
+  const inTable = editor.isActive('table')
 
   /** 一键排版入口：未配置模型时先引导到 AI 侧栏配置 */
   const openAutoFormat = () => {
@@ -42,7 +42,7 @@ export function Toolbar({ editor }: { editor: Editor }) {
       slashHelpers.openAI(editor)
       return
     }
-    setFmtOpen(true)
+    onAutoFormat?.()
   }
 
   return (
@@ -106,7 +106,7 @@ export function Toolbar({ editor }: { editor: Editor }) {
       <ToolbarBtn
         icon={<I.IconComment size={15} />}
         tip={`评论 ${keyHint('⌘⌥M', 'Ctrl+Alt+M')}`}
-        onClick={() => window.dispatchEvent(new CustomEvent('fe-toast', { detail: '评论功能即将上线，二期接入' }))}
+        onClick={() => window.dispatchEvent(new CustomEvent('fe-toast', { detail: '选中文字后用浮动工具栏「评论」添加评论' }))}
       />
 
       {/* 对齐 */}
@@ -138,16 +138,32 @@ export function Toolbar({ editor }: { editor: Editor }) {
 
       {/* 表格 */}
       <Dropdown button={({ open }) => (
-        <ToolbarBtn icon={<><I.IconTable size={15} /><I.IconChevronDown size={10} /></>} tip="表格" on={editor.isActive('table') || open} />
+        <ToolbarBtn icon={<><I.IconTable size={15} /><I.IconChevronDown size={10} /></>} tip="表格" on={inTable || open} />
       )}>
         {(close) => (
-          <div className="fe-menu" style={{ width: 140 }}>
-            {editor.isActive('table') ? (
+          <div className="fe-menu" style={{ width: 168 }}>
+            {inTable ? (
               <>
                 <div className="fe-mi" onClick={() => { c().addRowAfter().run(); close() }}><I.IconPlus size={14} /><span>插入行</span></div>
                 <div className="fe-mi" onClick={() => { c().addColumnAfter().run(); close() }}><I.IconPlus size={14} /><span>插入列</span></div>
                 <div className="fe-mi" onClick={() => { c().deleteRow().run(); close() }}><I.IconMinus size={14} /><span>删除当前行</span></div>
                 <div className="fe-mi" onClick={() => { c().deleteColumn().run(); close() }}><I.IconMinus size={14} /><span>删除当前列</span></div>
+                <div className="fe-mi" onClick={() => { c().toggleHeaderRow().run(); close() }}><I.IconTable size={14} /><span>切换表头行</span></div>
+                <div className="fe-menu-sep" />
+                <div className="fe-menu-sub-label">单元格背景</div>
+                <div className="fe-cell-colors">
+                  {CELL_BG.map((col) => (
+                    <button key={col} className="fe-color-dot" style={{ background: col === 'transparent' ? 'var(--bg-2)' : col }}
+                      onClick={() => { c().setCellAttribute('backgroundColor', col === 'transparent' ? '' : col).run(); close() }} />
+                  ))}
+                </div>
+                <div className="fe-menu-sub-label">单元格对齐</div>
+                <div className="fe-cell-aligns">
+                  <button title="左对齐" onClick={() => { c().setCellAttribute('textAlign', 'left').run(); close() }}><I.IconAlignLeft size={13} /></button>
+                  <button title="居中" onClick={() => { c().setCellAttribute('textAlign', 'center').run(); close() }}><I.IconAlignCenter size={13} /></button>
+                  <button title="右对齐" onClick={() => { c().setCellAttribute('textAlign', 'right').run(); close() }}><I.IconAlignRight size={13} /></button>
+                </div>
+                <div className="fe-menu-sep" />
                 <div className="fe-mi danger" onClick={() => { c().deleteTable().run(); close() }}><I.IconTrash size={14} /><span>删除表格</span></div>
               </>
             ) : (
@@ -166,8 +182,6 @@ export function Toolbar({ editor }: { editor: Editor }) {
         <I.IconMagic size={15} />
         <span>一键排版</span>
       </button>
-
-      {fmtOpen && <AutoFormatDialog editor={editor} onClose={() => setFmtOpen(false)} />}
     </div>
   )
 }

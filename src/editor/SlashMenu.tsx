@@ -6,6 +6,7 @@
  */
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { Extension, type Editor, type Range } from '@tiptap/core'
+import { PluginKey } from '@tiptap/pm/state'
 import Suggestion, { type SuggestionProps, type SuggestionKeyDownProps } from '@tiptap/suggestion'
 import { ReactRenderer } from '@tiptap/react'
 import { buildSlashItems, filterSlashItems, type SlashItem } from './slashItems'
@@ -24,6 +25,7 @@ export const SlashMenuList = forwardRef<ListHandle, ListProps>((props, ref) => {
   const [sel, setSel] = useState(0)
   const boxRef = useRef<HTMLDivElement>(null)
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- 过滤结果变化时回位，React 官方认可的 props 调整模式
   useEffect(() => setSel(0), [props.items])
   useEffect(() => {
     boxRef.current?.querySelector('.on')?.scrollIntoView({ block: 'nearest' })
@@ -120,6 +122,7 @@ export const SlashMenuExtension = Extension.create({
     const editor = this.editor
     const suggestion = Suggestion({
       editor,
+      pluginKey: new PluginKey('feSlashSuggestion'),
       char: '/',
       items: ({ query, editor: ed }: { query: string; editor: Editor }) =>
         filterSlashItems(buildSlashItems(ed), query),

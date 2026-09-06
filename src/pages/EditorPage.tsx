@@ -1,8 +1,8 @@
 /**
- * 文档编辑页骨架 — 设计规范 §1.2
- * TopBar 56px + Toolbar 40px（编辑态） + 800px 居中编辑区 + 大纲面板
- * 自动保存（500ms 防抖） / 星标 / 分享弹层 / 阅读模式 / 更多菜单
- * AI帮我写浮层（用户自备模型） / 全局 Toast / 阅读模式按 E 进入编辑
+ * 文档编辑页 — 设计规范 v2
+ * TopBar + 工具栏 + 正文（图标/封面/宽度） + 左侧大纲 + 右侧 AI/评论栏
+ * 数据：IndexedDB（store v2），500ms 防抖保存 + 自动快照
+ * 浮层：AI 侧栏 / 评论 / 历史 / 查找替换 / 模版 / 分享 / Toast
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
@@ -14,18 +14,42 @@ import { OutlinePanel } from '../editor/OutlinePanel'
 import { SharePopover } from '../editor/SharePopover'
 import { Dropdown } from '../editor/Dropdown'
 import { AISidebar } from '../editor/ai/AISidebar'
+import { AutoFormatDialog } from '../editor/ai/AutoFormat'
+import { HistoryDialog, TemplatePicker, CommentsPanel, FindReplacePanel } from '../editor/panels'
 import { slashHelpers, type AIOpenOptions } from '../editor/slashHelpers'
 import { currentTopBlockIndex } from '../editor/blockOps'
-import { buildExtensions } from '../editor/extensions'
+import { buildExtensions, editorPropsForPaste } from '../editor/extensions'
 import {
   getDocMeta, getDocContent, saveDocContent, updateMeta, toggleStar, moveToTrash, defaultContent, createDoc,
+  type DocMeta,
 } from '../data/store'
 import * as I from '../components/icons'
 
 type SaveStatus = 'saved' | 'saving'
 type Mode = 'edit' | 'read'
 
-/** 读取持久化内容：localStorage 存的是 JSON 字符串，需解析为文档对象（否则会被当作 HTML 文本） */
+const COVER_PRESETS = [
+  'linear-gradient(135deg,#3370FF,#7F3BF5)',
+  'linear-gradient(135deg,#FF8800,#F54A45)',
+  'linear-gradient(135deg,#34A853,#3370FF)',
+  'linear-gradient(135deg,#F5319D,#7F3BF5)',
+  'linear-gradient(135deg,#FAAD14,#FF8800)',
+  'linear-gradient(160deg,#1F2329,#646A73)',
+  'linear-gradient(135deg,#00C6BE,#3370FF)',
+  'linear-gradient(135deg,#8F959E,#3370FF)',
+]
+
+const ICON_PRESETS = ['📄','📘','🚀','💡','📌','📊','✅','🎯','🔥','🌟','🧪','🛠️','📈','🗂️','💬','🎨','☕','🌱','⚡','🧩','📅','🔗','🐣','🏆']
+
+function readFileAsDataURL(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+}
+
 function parseStoredContent(docId: string) {
   const raw = getDocContent(docId)
   if (raw) {
@@ -39,7 +63,7 @@ function parseStoredContent(docId: string) {
 }
 
 export default function EditorPage({ docId, onBack }: { docId: string; onBack: () => void }) {
-  const meta = getDocMeta(docId)
+  const [meta, setMeta] = useState<DocMeta | undefined>(() => getDocMeta(docId))
   const [title, setTitle] = useState(meta?.title ?? '')
   const [starred, setStarred] = useState(meta?.starred ?? false)
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved')
@@ -49,19 +73,34 @@ export default function EditorPage({ docId, onBack }: { docId: string; onBack: (
   const [linkCopied, setLinkCopied] = useState(false)
   const [ai, setAI] = useState<{ open: boolean; seed: AIOpenOptions & { context?: string } }>({ open: false, seed: {} })
   const [toast, setToast] = useState<{ id: number; msg: string } | null>(null)
+  const [iconPickerOpen, setIconPickerOpen] = useState(false)
+  const [coverPickerOpen, setCoverPickerOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [tplOpen, setTplOpen] = useState(false)
+  const [commentsOpen, setCommentsOpen] = useState(false)
+  const [findOpen, setFindOpen] = useState(false)
+  const [fmtOpen, setFmtOpen] = useState(false)
   const titleRef = useRef<HTMLTextAreaElement>(null)
 
   const editor = useEditor({
     extensions: buildExtensions(),
     content: parseStoredContent(docId),
     autofocus: false,
+    editorProps: editorPropsForPaste(readFileAsDataURL),
     onUpdate: () => setSaveStatus('saving'),
   }, [docId])
 
   const titleSyncRef = useRef(title)
-  titleSyncRef.current = title
+  useEffect(() => {
+    titleSyncRef.current = title
+  }, [title])
 
-  /* ---------- 全局 Toast（斜杠菜单/工具栏占位功能提示） ---------- */
+  // 开发调试句柄（生产无副作用）
+  useEffect(() => {
+    if (editor) (window as unknown as Record<string, unknown>).__feEditor = editor
+  }, [editor])
+
+  /* ---------- 全局 Toast ---------- */
   const showToast = useCallback((msg: string) => {
     setToast({ id: Date.now(), msg })
   }, [])
@@ -76,22 +115,24 @@ export default function EditorPage({ docId, onBack }: { docId: string; onBack: (
     return () => window.removeEventListener('fe-toast', onToast)
   }, [showToast])
 
-  /* ---------- 斜杠菜单/块把手/浮条 与页面能力对接（AI 侧栏 / 副本 / Toast） ---------- */
+  /* ---------- 菜单/浮条与页面能力对接 ---------- */
   useEffect(() => {
     if (!editor) return
     slashHelpers.openAI = (ed: Editor, opts?: AIOpenOptions) => {
-      // 上下文快照：优先当前选区，其次光标所在顶层块
       let context = ''
       try {
         const { from, to, empty } = ed.state.selection
-        if (!empty && to > from) context = ed.state.doc.textBetween(from, to, '\n')
-        else context = ed.state.doc.child(currentTopBlockIndex(ed))?.textContent ?? ''
+        context = !empty && to > from
+          ? ed.state.doc.textBetween(from, to, '\n')
+          : ed.state.doc.child(currentTopBlockIndex(ed))?.textContent ?? ''
       } catch {
-        context = ''
+        /* 光标异常时保持空上下文 */
       }
       setAI({ open: true, seed: { prompt: opts?.prompt, quick: opts?.quick, context: context.trim() } })
     }
     slashHelpers.toast = showToast
+    slashHelpers.openTemplates = () => setTplOpen(true)
+    slashHelpers.docId = () => docId
     slashHelpers.duplicateDoc = () => {
       const created = createDoc()
       const content = editor ? JSON.stringify(editor.getJSON()) : getDocContent(docId)
@@ -102,10 +143,11 @@ export default function EditorPage({ docId, onBack }: { docId: string; onBack: (
     }
   }, [editor, docId, showToast])
 
-  /* ---------- 自动保存：正文防抖 500ms，卸载时 flush ---------- */
+  /* ---------- 自动保存（含自动快照，内容不变时快照自动去重） ---------- */
   const doSave = useCallback(() => {
     if (!editor) return
-    saveDocContent(docId, JSON.stringify(editor.getJSON()))
+    const json = JSON.stringify(editor.getJSON())
+    saveDocContent(docId, json, { snapshot: true })
     updateMeta(docId, { title: titleSyncRef.current })
     setSaveStatus('saved')
   }, [editor, docId])
@@ -125,11 +167,11 @@ export default function EditorPage({ docId, onBack }: { docId: string; onBack: (
       editor.off('update', schedule)
       window.removeEventListener('beforeunload', onLeave)
       window.clearTimeout(timer.id)
-      doSave() // 离开页面时保存剩余改动
+      doSave()
     }
   }, [editor, doSave])
 
-  /* ---------- 标题变更防抖写入 meta ---------- */
+  /* ---------- 标题防抖写入 ---------- */
   const firstTitle = useRef(true)
   useEffect(() => {
     if (firstTitle.current) { firstTitle.current = false; return }
@@ -141,11 +183,10 @@ export default function EditorPage({ docId, onBack }: { docId: string; onBack: (
     return () => window.clearTimeout(t)
   }, [title, docId])
 
-  /* ---------- 编辑 / 阅读模式（阅读态按 E 进入编辑，对齐飞书） ---------- */
+  /* ---------- 编辑 / 阅读模式（阅读态按 E 进入编辑） ---------- */
   useEffect(() => {
     if (!editor) return
     editor.setEditable(mode === 'edit')
-    // 补发空事务，让 BubbleToolbar/BlockHandle 等监听 transaction 的浮层立即刷新显隐
     editor.view.dispatch(editor.state.tr)
   }, [editor, mode])
 
@@ -160,13 +201,40 @@ export default function EditorPage({ docId, onBack }: { docId: string; onBack: (
     return () => document.removeEventListener('keydown', onKey)
   }, [mode])
 
+  /* ---------- 查找替换：⌘F / ⌘⇧H ---------- */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F') && !e.shiftKey) {
+        e.preventDefault()
+        setFindOpen(true)
+      }
+      if ((e.metaKey || e.ctrlKey) && ((e.key === 'h' || e.key === 'H') || (e.key === 'f' && e.shiftKey))) {
+        e.preventDefault()
+        setFindOpen(true)
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
+
+  /* ---------- 点击评论高亮 → 打开评论面板 ---------- */
+  useEffect(() => {
+    if (!editor) return
+    const onClick = (e: MouseEvent) => {
+      const el = (e.target as HTMLElement).closest('[data-comment-id]')
+      if (el) setCommentsOpen(true)
+    }
+    editor.view.dom.addEventListener('click', onClick)
+    return () => editor.view.dom.removeEventListener('click', onClick)
+  }, [editor])
+
   /* ---------- 新建空文档自动聚焦标题 ---------- */
   useEffect(() => {
     if (!meta?.title) titleRef.current?.focus()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  /* ---------- 标题高度自适应（长标题自动换行） ---------- */
+  /* ---------- 标题高度自适应 ---------- */
   useEffect(() => {
     const el = titleRef.current
     if (el) {
@@ -190,6 +258,12 @@ export default function EditorPage({ docId, onBack }: { docId: string; onBack: (
     moveToTrash(docId)
     onBack()
   }
+
+  const patchMeta = (patch: Partial<DocMeta>) => {
+    setMeta(updateMeta(docId, patch))
+  }
+
+  const wide = meta?.width === 'wide'
 
   return (
     <div className="fe-editor-page">
@@ -220,17 +294,15 @@ export default function EditorPage({ docId, onBack }: { docId: string; onBack: (
             <span className="fe-avatar fe-avatar-sm" style={{ background: 'linear-gradient(135deg,#34A853,#3370FF)' }}>李</span>
           </div>
 
+          {/* 评论入口 */}
+          <button className={`fe-topbar-icon-btn ${commentsOpen ? 'on' : ''}`} title="评论" onClick={() => setCommentsOpen((v) => !v)}>
+            <I.IconComment size={16} />
+          </button>
+
           {/* 历史记录 */}
-          <Dropdown button={() => (
-            <button className="fe-topbar-icon-btn" title="历史记录"><I.IconHistory size={16} /></button>
-          )}>
-            {() => (
-              <div className="fe-history-pop">
-                <div className="fe-history-title"><I.IconHistory size={14} /> 历史记录</div>
-                <div className="fe-history-empty">暂无历史记录<br /><span>版本历史与对比将在二期提供</span></div>
-              </div>
-            )}
-          </Dropdown>
+          <button className="fe-topbar-icon-btn" title="历史记录" onClick={() => setHistoryOpen(true)}>
+            <I.IconHistory size={16} />
+          </button>
 
           <button className="fe-btn-primary fe-share-btn" onClick={() => setShareOpen(true)}>
             分&nbsp;&nbsp;享
@@ -241,7 +313,7 @@ export default function EditorPage({ docId, onBack }: { docId: string; onBack: (
             <button className={`fe-topbar-icon-btn ${open ? 'on' : ''}`} title="更多"><I.IconMore size={16} /></button>
           )}>
             {(close) => (
-              <div className="fe-menu" style={{ width: 200 }}>
+              <div className="fe-menu" style={{ width: 210 }}>
                 <div className="fe-mi" onClick={() => { setOutlineOpen((v) => !v); close() }}>
                   <I.IconList size={15} /><span>大纲</span>
                   <span className="fe-mi-state">{outlineOpen ? '已开启' : '已关闭'}</span>
@@ -249,6 +321,26 @@ export default function EditorPage({ docId, onBack }: { docId: string; onBack: (
                 <div className="fe-mi" onClick={() => { setMode(mode === 'edit' ? 'read' : 'edit'); close() }}>
                   {mode === 'edit' ? <I.IconEye size={15} /> : <I.IconPencil size={15} />}
                   <span>{mode === 'edit' ? '切换到阅读模式' : '切换到编辑模式'}</span>
+                </div>
+                <div className="fe-mi" onClick={() => { patchMeta({ width: wide ? 'std' : 'wide' }); close() }}>
+                  <I.IconColumns size={15} /><span>页面宽度</span>
+                  <span className="fe-mi-state">{wide ? '宽' : '标准'}</span>
+                </div>
+                <div className="fe-mi" onClick={() => {
+                  const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'
+                  document.documentElement.setAttribute('data-theme', next)
+                  localStorage.setItem('feishu-clone:theme', next)
+                  close()
+                }}>
+                  <I.IconEye size={15} /><span>外观</span>
+                  <span className="fe-mi-state">{document.documentElement.getAttribute('data-theme') === 'dark' ? '深色' : '浅色'}</span>
+                </div>
+                <div className="fe-mi" onClick={() => { setFindOpen(true); close() }}>
+                  <I.IconSearch size={15} /><span>查找与替换</span>
+                  <span className="fe-mi-state">⌘F</span>
+                </div>
+                <div className="fe-mi" onClick={() => { window.print(); close() }}>
+                  <I.IconDownload size={15} /><span>打印 / 导出 PDF</span>
                 </div>
                 <div className="fe-mi" onClick={() => { onCopyLink(); close() }}>
                   <I.IconLink size={15} /><span>{linkCopied ? '链接已复制' : '复制链接'}</span>
@@ -273,10 +365,14 @@ export default function EditorPage({ docId, onBack }: { docId: string; onBack: (
         </div>
       </header>
 
-      {/* ============ Toolbar 40px（编辑态显示） ============ */}
-      {mode === 'edit' && editor && <div className="fe-toolbar-wrap"><Toolbar editor={editor} /></div>}
+      {/* ============ Toolbar ============ */}
+      {mode === 'edit' && editor && (
+        <div className="fe-toolbar-wrap">
+          <Toolbar editor={editor} onAutoFormat={() => setFmtOpen(true)} />
+        </div>
+      )}
 
-      {/* ============ 主体：大纲(左) + 编辑区 + AI侧栏(右) ============ */}
+      {/* ============ 主体：大纲(左) + 正文 + AI/评论(右) ============ */}
       <div className="fe-body">
         {outlineOpen && editor && <OutlinePanel editor={editor} onCollapse={() => setOutlineOpen(false)} />}
         {!outlineOpen && (
@@ -285,7 +381,40 @@ export default function EditorPage({ docId, onBack }: { docId: string; onBack: (
             <span>大纲</span>
           </button>
         )}
-        <div className="fe-content">
+        <div className={`fe-content ${wide ? 'wide' : ''}`}>
+          {/* 封面 */}
+          {meta?.cover && (
+            <div className="fe-doc-cover" style={{ background: meta.cover }}>
+              <div className="fe-doc-cover-ops">
+                <button onClick={() => setCoverPickerOpen(true)}>更换封面</button>
+                <button onClick={() => patchMeta({ cover: '' })}>移除封面</button>
+              </div>
+            </div>
+          )}
+          {/* 图标 + 装饰按钮 */}
+          <div className="fe-doc-deco-row">
+            {meta?.icon && <span className="fe-doc-icon">{meta.icon}</span>}
+            <div className="fe-doc-deco">
+              {!meta?.cover && <button onClick={() => setCoverPickerOpen(true)}>添加封面</button>}
+              <button onClick={() => setIconPickerOpen(true)}>{meta?.icon ? '更换图标' : '添加图标'}</button>
+            </div>
+          </div>
+          {iconPickerOpen && (
+            <div className="fe-emoji-pop">
+              {ICON_PRESETS.map((e) => (
+                <button key={e} onClick={() => { patchMeta({ icon: e }); setIconPickerOpen(false) }}>{e}</button>
+              ))}
+              <button className="clear" onClick={() => { patchMeta({ icon: '' }); setIconPickerOpen(false) }}>移除</button>
+            </div>
+          )}
+          {coverPickerOpen && (
+            <div className="fe-emoji-pop cover">
+              {COVER_PRESETS.map((c) => (
+                <button key={c} className="cover-item" style={{ background: c }} onClick={() => { patchMeta({ cover: c }); setCoverPickerOpen(false) }} />
+              ))}
+            </div>
+          )}
+
           <textarea
             ref={titleRef}
             className="fe-doc-title"
@@ -303,17 +432,24 @@ export default function EditorPage({ docId, onBack }: { docId: string; onBack: (
           />
           <EditorContent editor={editor} className="fe-editor" />
         </div>
+
         {editor && ai.open && mode === 'edit' && (
           <AISidebar editor={editor} seed={ai.seed} onClose={() => setAI((v) => ({ ...v, open: false }))} />
+        )}
+        {editor && commentsOpen && (
+          <CommentsPanel docId={docId} editor={editor} onClose={() => setCommentsOpen(false)} />
         )}
       </div>
 
       {/* ============ 浮层 ============ */}
       {editor && <BubbleToolbar editor={editor} />}
       {editor && <BlockHandle editor={editor} editable={mode === 'edit'} />}
+      {editor && fmtOpen && mode === 'edit' && <AutoFormatDialog editor={editor} onClose={() => setFmtOpen(false)} />}
+      {editor && historyOpen && <HistoryDialog docId={docId} editor={editor} onClose={() => setHistoryOpen(false)} />}
+      {editor && tplOpen && mode === 'edit' && <TemplatePicker editor={editor} onClose={() => setTplOpen(false)} />}
+      {editor && findOpen && <FindReplacePanel editor={editor} onClose={() => setFindOpen(false)} />}
       {shareOpen && <SharePopover docId={docId} onClose={() => setShareOpen(false)} />}
 
-      {/* ============ Toast ============ */}
       {toast && <div className="fe-toast" key={toast.id}>{toast.msg}</div>}
     </div>
   )

@@ -94,8 +94,8 @@ export function AutoFormatDialog({ editor, onClose }: { editor: Editor; onClose:
   const [plan, setPlan] = useState<PlanItem[]>([])
   const [errorMsg, setErrorMsg] = useState('')
   const [elapsed, setElapsed] = useState(0)
+  const [blocks, setBlocks] = useState<DocBlock[]>([])
   const abortRef = useRef<AbortController | null>(null)
-  const blocksRef = useRef<DocBlock[]>([])
 
   const analyze = async () => {
     const cfg = loadAIConfig()
@@ -104,8 +104,8 @@ export function AutoFormatDialog({ editor, onClose }: { editor: Editor; onClose:
       setPhase('error')
       return
     }
-    const blocks = collectBlocks(editor)
-    blocksRef.current = blocks
+    const docBlocks = collectBlocks(editor)
+    setBlocks(docBlocks)
     if (!blocks.some((b) => b.eligible && b.text)) {
       setErrorMsg('文档没有可排版的文字内容。')
       setPhase('error')
@@ -123,7 +123,7 @@ export function AutoFormatDialog({ editor, onClose }: { editor: Editor; onClose:
         cfg,
         [
           { role: 'system', content: '你是严谨的文档结构分析器，只输出 JSON，不输出任何其他文字。' },
-          { role: 'user', content: buildPrompt(blocks) },
+          { role: 'user', content: buildPrompt(docBlocks) },
         ],
         (chunk) => { full += chunk },
         ctrl.signal,
@@ -141,14 +141,13 @@ export function AutoFormatDialog({ editor, onClose }: { editor: Editor; onClose:
   }
 
   useEffect(() => {
-    void analyze()
+    void analyze() // eslint-disable-line react-hooks/set-state-in-effect -- 打开对话框即自动分析
     return () => abortRef.current?.abort()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   /** 应用方案：单个事务内完成全部转换（⌘Z 一次撤回整体） */
   const apply = () => {
-    const blocks = blocksRef.current
     const levelOf = new Map(plan.map((p) => [p.i, p.level]))
     let chain = editor.chain().focus()
     let changed = 0
@@ -174,8 +173,6 @@ export function AutoFormatDialog({ editor, onClose }: { editor: Editor; onClose:
   }
 
   /* ---------- 预览数据 ---------- */
-  const blocks = blocksRef.current
-  const levelOf = new Map(plan.map((p) => [p.i, p.level]))
   const headings = plan
     .filter((p) => p.level > 0)
     .map((p) => ({ ...p, text: blocks[p.i]?.text || '' }))

@@ -10,6 +10,7 @@ import type { ReactNode } from 'react'
 import * as I from '../components/icons'
 import { getVisibleHeadingLevels } from './headingLevels'
 import { insertMockBlock } from './mockBlocks'
+import { insertGridContent, openUserPicker, todayStr } from './advancedBlocks'
 import { slashHelpers } from './slashHelpers'
 
 export type SlashGroup = '基础' | '常用' | '按钮' | '团队协作'
@@ -160,7 +161,7 @@ export function buildSlashItems(editor: Editor): SlashItem[] {
     {
       group: '常用', title: '分栏', desc: '并排组织多栏内容', icon: <I.IconColumns size={16} />,
       keywords: ['column', 'fl', 'fenlan', '布局', '/fl'],
-      command: ({ editor: e, range }) => run(e, range, () => insertMockBlock(e, 'column')),
+      command: ({ editor: e, range }) => run(e, range, () => insertGridContent(e, '2')),
     },
     {
       group: '常用', title: '高亮块', desc: '突出显示重要内容', icon: <I.IconCallout size={16} />,
@@ -173,14 +174,14 @@ export function buildSlashItems(editor: Editor): SlashItem[] {
       command: ({ editor: e, range }) => run(e, range, () => insertMockBlock(e, 'sync')),
     },
     {
-      group: '常用', title: '公式', desc: '插入数学公式', icon: <I.IconFormula size={16} />,
+      group: '常用', title: '公式', desc: '插入 LaTeX 数学公式', icon: <I.IconFormula size={16} />,
       keywords: ['equation', 'formula', 'gs', 'gongshi', '数学', '/gs', '/eq'],
-      command: ({ editor: e, range }) => run(e, range, () => insertMockBlock(e, 'formula')),
+      command: ({ editor: e, range }) => run(e, range, () => e.chain().focus().insertFormula().run()),
     },
     {
       group: '常用', title: '模版', desc: '从模版库插入内容', icon: <I.IconTemplate size={16} />,
       keywords: ['template', 'mb', 'muban', '/mb', '模板'],
-      command: ({ editor: e, range }) => run(e, range, () => insertMockBlock(e, 'template')),
+      command: ({ editor: e, range }) => run(e, range, () => slashHelpers.openTemplates(e)),
     },
     /* ---------- 按钮（文档级操作） ---------- */
     {
@@ -202,7 +203,7 @@ export function buildSlashItems(editor: Editor): SlashItem[] {
     {
       group: '团队协作', title: '人员', desc: '提及一位协作者', icon: <I.IconAvatar size={16} />,
       keywords: ['people', 'user', 'ry', 'renyuan', '成员', '@'],
-      command: ({ editor: e, range }) => run(e, range, () => insertMockBlock(e, 'user')),
+      command: ({ editor: e, range }) => run(e, range, () => openUserPicker(e)),
     },
     {
       group: '团队协作', title: '群名片', desc: '分享一个飞书群', icon: <I.IconUsers size={16} />,
@@ -227,7 +228,7 @@ export function buildSlashItems(editor: Editor): SlashItem[] {
     {
       group: '团队协作', title: '日期提醒', desc: '插入日期并设置提醒', icon: <I.IconBell size={16} />,
       keywords: ['date', 'reminder', 'rq', 'riqi', '//', '/rq', '/date'],
-      command: ({ editor: e, range }) => run(e, range, () => insertMockBlock(e, 'reminder')),
+      command: ({ editor: e, range }) => run(e, range, () => e.chain().focus().insertContent({ type: 'dateChip', attrs: { date: todayStr() } }).run()),
     },
     {
       group: '团队协作', title: '信息收集', desc: '用表单收集信息', icon: <I.IconClipboard size={16} />,

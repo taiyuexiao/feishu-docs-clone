@@ -100,7 +100,7 @@ export function AISidebar({ editor, seed, onClose }: {
   useEffect(() => {
     if (sentSeedRef.current) return
     sentSeedRef.current = true
-    if (seed.prompt && configured) void send(seed.prompt, seed.context)
+    if (seed.prompt && configured) void send(seed.prompt, seed.context) // eslint-disable-line react-hooks/set-state-in-effect
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -167,7 +167,7 @@ export function AISidebar({ editor, seed, onClose }: {
           <input type="range" min={0} max={1.5} step={0.1} value={cfg.temperature}
             onChange={(e) => setCfg({ ...cfg, temperature: Number(e.target.value) })} />
           <div className="fe-ai-config-actions">
-            <button className="fe-ai-btn ghost" onClick={() => setConfiguring(false)}>完成</button>
+            <button className="fe-ai-btn ghost" onClick={saveConfig}>完成</button>
           </div>
         </div>
       ) : (
